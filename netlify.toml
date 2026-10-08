@@ -1,0 +1,12 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# The team file changes when rates are published; never serve a stale copy.
+[[headers]]
+  for = "/team-data.json"
+  [headers.values]
+    Cache-Control = "no-cache"

@@ -38,11 +38,9 @@ npm test           # pricing engine tests
 npm run build      # production build in dist/
 ```
 
-## Put it on GitHub Pages
+## Hosting (Netlify)
 
-1. Push to `main`.
-2. In GitHub, go to **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-3. The workflow `.github/workflows/deploy.yml` tests, builds and deploys. The site URL appears in the Actions run.
+The site is hosted on Netlify (`netlify.toml`), linked to this GitHub repo. Every commit to `main` is built and published automatically, and the repo can stay private. GitHub Actions (`.github/workflows/ci.yml`) runs the tests on every change.
 
 ## Team logins
 
@@ -57,10 +55,7 @@ Rates and logins live in `public/team-data.json`. The file is encrypted: the dat
 
 Saved quotes stay on each person's own device. Hiding cost and profit from staff is done in the app's screens; a technical person with a staff login could still decode the rates from the file.
 
-Things to know:
-
-- The *code* on a Pages site is public. Never commit real rates unencrypted (for example into `src/data/seed.ts`).
-- GitHub Pages from a **private** repo needs a paid GitHub plan. You can also just run it locally.
+Never commit real rates unencrypted (for example into `src/data/seed.ts`).
 
 ## AI (optional)
 
