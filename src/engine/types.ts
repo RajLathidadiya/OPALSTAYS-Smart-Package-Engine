@@ -21,15 +21,31 @@ export interface SeasonRate {
   name: string;
   from: string; // MM-DD
   to: string; // MM-DD (inclusive)
+  days?: number[]; // only these nights of the week (0 = Sunday), e.g. [5, 6] = Fri & Sat nights; empty = every night
   b2b: number; // per room per night (OPALSTAYS cost)
   b2c: number; // per room per night (public / rack rate)
   extraBedB2b?: number;
   extraBedB2c?: number;
 }
 
+/**
+ * Per-person ("sharing") pricing: the total price of one room/unit per night when
+ * `guests` people share it. Rows with a `season` name apply during that season;
+ * rows without one are the regular rate.
+ */
+export interface OccupancyRate {
+  id: string;
+  guests: number;
+  b2b: number; // total per room per night
+  b2c: number;
+  season?: string;
+}
+
 export interface RoomType {
   id: string;
   name: string;
+  pricing?: "per-room" | "per-person"; // default per-room
+  occupancyRates?: OccupancyRate[]; // used when pricing = per-person
   ac: boolean;
   baseOccupancy: number; // guests included in room rate
   maxOccupancy: number; // incl. extra bed(s)
@@ -41,7 +57,7 @@ export interface RoomType {
   seasons: SeasonRate[];
 }
 
-export type PropertyKind = "Hotel" | "Resort" | "Villa" | "Homestay" | "Camp" | "Heritage";
+export type PropertyKind = "Hotel" | "Resort" | "Villa" | "Homestay" | "Camp" | "Heritage" | "Farmhouse";
 
 export interface Property {
   id: string;
@@ -56,6 +72,8 @@ export interface Property {
   priority: number; // higher = preferred when costs are similar
   active: boolean;
   rateValidTill: string; // YYYY-MM-DD, warn after this
+  hotelGst?: boolean; // add hotel GST to cost (5% up to ₹7,500 per room-night, 18% above)
+  mealRates?: Partial<Record<Meal, { b2b: number; b2c: number }>>; // this property's own extra-meal prices
   description: string;
   roomTypes: RoomType[];
 }
@@ -123,7 +141,7 @@ export type ActivityCategory =
   | "Guide"
   | "Local Experience";
 
-export type Slot = "morning" | "afternoon" | "sunset" | "evening";
+export type Slot = "early" | "morning" | "afternoon" | "sunset" | "evening";
 
 export interface Activity {
   id: string;
@@ -222,6 +240,7 @@ export interface StayPlan {
   roomType: RoomType;
   rooms: number;
   extraBeds: number;
+  sharing?: number[]; // per-person rooms: guests in each room, e.g. [4, 2]
   mealPlan: MealPlan;
   alternatives: { property: Property; roomType: RoomType; cost: number }[];
 }

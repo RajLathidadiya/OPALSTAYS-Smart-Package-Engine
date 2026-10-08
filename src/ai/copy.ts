@@ -1,7 +1,7 @@
 // Customer-facing package copy: shared types, the customer-safe view of a
 // package, and the offline template used when AI is off.
 import type { PackageOption, TripRequest } from "../engine/types";
-import { TIER_LABEL } from "../engine/packages";
+import { TIER_LABEL, propertyType } from "../engine/packages";
 
 export interface AiCopy {
   title: string;
@@ -27,7 +27,7 @@ export function customerSafePackage(opt: PackageOption, req: TripRequest) {
       city: s.city,
       nights: s.nights,
       hotel: s.property.name,
-      type: `${s.property.stars}★ ${s.property.kind}`,
+      type: propertyType(s.property),
       about: s.property.description,
       room: s.roomType.name,
     })),

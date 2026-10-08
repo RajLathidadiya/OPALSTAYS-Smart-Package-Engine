@@ -23,13 +23,10 @@ const room: RoomType = {
 const request: TripRequest = {
   customerName: "Test",
   origin: "Ahmedabad",
-  destinations: [
-    { city: "Udaipur", nights: 0 },
-    { city: "Jaisalmer", nights: 0 },
-  ],
+  destinations: [{ city: "Sasan Gir", nights: 0 }],
   members: 4,
-  startDate: "2026-10-15",
-  endDate: "2026-10-18",
+  startDate: "2026-11-20",
+  endDate: "2026-11-23",
   budget: 35000,
   acRequired: true,
   meals: { breakfast: true, lunch: false, dinner: false },
@@ -110,9 +107,10 @@ describe("package generator", () => {
   });
 
   it("distributes nights, extra nights to earlier stops", () => {
-    expect(distributeNights(request).nights).toEqual([2, 1]);
-    expect(distributeNights({ ...request, destinations: [{ city: "Udaipur", nights: 1 }, { city: "Jaisalmer", nights: 0 }] }).nights).toEqual([1, 2]);
-    expect(distributeNights({ ...request, destinations: [{ city: "Udaipur", nights: 1 }, { city: "Jaisalmer", nights: 1 }] }).error).toBeDefined();
+    const two = { ...request, destinations: [{ city: "Sasan Gir", nights: 0 }, { city: "Somnath", nights: 0 }] };
+    expect(distributeNights(two).nights).toEqual([2, 1]);
+    expect(distributeNights({ ...two, destinations: [{ city: "Sasan Gir", nights: 1 }, { city: "Somnath", nights: 0 }] }).nights).toEqual([1, 2]);
+    expect(distributeNights({ ...two, destinations: [{ city: "Sasan Gir", nights: 1 }, { city: "Somnath", nights: 1 }] }).error).toBeDefined();
   });
 
   it("builds Budget / Premium / Luxury options for the sample trip", () => {
@@ -123,7 +121,7 @@ describe("package generator", () => {
       const sum = o.lineItems.reduce((s, l) => s + l.cost, 0);
       expect(o.price.cost).toBe(sum);
       expect(o.price.cost + o.price.profit + o.price.gst + o.price.agentCommission).toBe(o.price.finalPrice);
-      expect(o.stays.map((s) => s.city)).toEqual(["Udaipur", "Jaisalmer"]);
+      expect(o.stays.map((s) => s.city)).toEqual(["Sasan Gir"]);
       expect(o.itinerary[0].entries.length).toBeGreaterThan(0);
     }
     expect(q.options[0].price.finalPrice).toBeLessThan(q.options[2].price.finalPrice);
@@ -133,5 +131,67 @@ describe("package generator", () => {
     const a = generateQuote(seedDatabase(), request);
     const b = generateQuote(seedDatabase(), request);
     expect(a.options.map((o) => o.price)).toEqual(b.options.map((o) => o.price));
+  });
+});
+
+describe("Sasan Gir rate sheet", () => {
+  const db = seedDatabase();
+  const prop = (id: string) => db.properties.find((p) => p.id === id)!;
+  const tier = defaultSettings.tiers.budget;
+  const noMeals = { breakfast: false, lunch: false, dinner: false };
+
+  it("B2B is 10% below B2C on every rate", () => {
+    for (const p of db.properties)
+      for (const r of p.roomTypes) {
+        expect(r.b2b).toBe(Math.round(r.b2c * 0.9));
+        for (const o of r.occupancyRates ?? []) expect(o.b2b).toBe(Math.round(o.b2c * 0.9));
+        for (const s of r.seasons) expect(s.b2b).toBe(Math.round(s.b2c * 0.9));
+      }
+  });
+
+  it("Shree Van: 6 people off season share one room at ₹1,100/person (B2C)", () => {
+    const room = prop("shreevan").roomTypes[0];
+    const [config] = roomConfigs(room, 6, "2026-11-20", 2);
+    expect(config.sharing).toEqual([6]);
+    const p = priceStay(prop("shreevan"), room, config, "2026-11-20", 2, 6, noMeals, tier);
+    expect(p.lines[0].rack).toBe(1100 * 6 * 2);
+    expect(p.lines[0].cost).toBe(5940 * 2);
+    // + 5% hotel GST on the B2B tariff
+    expect(p.roomCost).toBe(5940 * 2 + Math.round(5940 * 2 * 0.05));
+  });
+
+  it("Shree Van: season nights use the season sharing rate", () => {
+    const room = prop("shreevan").roomTypes[0];
+    const [config] = roomConfigs(room, 2, "2026-12-24", 1);
+    const p = priceStay(prop("shreevan"), room, config, "2026-12-24", 1, 2, noMeals, tier);
+    expect(p.lines[0].rack).toBe(4950);
+    expect(p.lines[0].formula).toContain("(Season)");
+  });
+
+  it("Aaranya: 8 people split into the cheapest rooms", () => {
+    const room = prop("aaranya").roomTypes[0];
+    const [config] = roomConfigs(room, 8, "2026-11-20", 1);
+    expect(config.sharing!.reduce((a, b) => a + b, 0)).toBe(8);
+    // 6+2 = 9900+6050 = 15950; 4+4 = 15840; 5+3 = 15400 (B2C) → cheapest is 5+3
+    expect(config.sharing).toEqual([5, 3]);
+  });
+
+  it("Wild Calm: Friday and Saturday nights are weekend rates, 18% GST above ₹7,500", () => {
+    const p = prop("wildcalm");
+    const room = p.roomTypes.find((r) => r.name === "Calm Cub (CP)")!;
+    // Thu 19, Fri 20, Sat 21 Nov 2026
+    const price = priceStay(p, room, { rooms: 1, extraBeds: 0 }, "2026-11-19", 3, 2, noMeals, tier);
+    const hotel = price.lines.filter((l) => l.category === "Hotel" && !l.label.includes("GST"));
+    expect(hotel.map((l) => l.rack)).toEqual([7861, 8647 * 2]);
+    const gst = price.lines.find((l) => l.label.includes("GST"))!;
+    expect(gst.formula).toContain("5% / 18%");
+  });
+
+  it("Gokul: extra dinner uses the hotel's own rate", () => {
+    const p = prop("gokul");
+    const room = p.roomTypes.find((r) => r.id === "gokul-sharing")!;
+    const price = priceStay(p, room, { rooms: 1, extraBeds: 0, sharing: [4] }, "2026-11-20", 1, 4, { breakfast: false, lunch: false, dinner: true }, tier);
+    const dinner = price.lines.find((l) => l.category === "Food")!;
+    expect(dinner.cost).toBe(248 * 4);
   });
 });

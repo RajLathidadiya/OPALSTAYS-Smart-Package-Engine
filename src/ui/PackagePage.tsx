@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CostCategory, Database, PackageOption, TripRequest } from "../engine/types";
-import { TIER_LABEL } from "../engine/packages";
+import { TIER_LABEL, propertyType, roomsLabel } from "../engine/packages";
 import { formatDate, inr, plural } from "../engine/util";
 import { templateCopy, type AiCopy, type CopyLanguage } from "../ai/copy";
 import { getApiKey } from "../store/db";
@@ -145,12 +145,11 @@ function CustomerQuote(props: { db: Database; option: PackageOption; request: Tr
                   <td>
                     {st.property.name}
                     <div className="muted" style={{ fontSize: "0.8rem" }}>
-                      {st.property.stars}★ {st.property.kind}, {st.property.area}
+                      {propertyType(st.property)}, {st.property.area}
                     </div>
                   </td>
                   <td>
-                    {plural(st.rooms, "room")} {st.roomType.name}
-                    {st.extraBeds > 0 && ` + ${plural(st.extraBeds, "extra bed")}`}
+                    {roomsLabel(st)}
                   </td>
                   <td>{MEAL_PLAN[st.mealPlan]}</td>
                   <td className="num">
@@ -254,7 +253,7 @@ function whatsappText(o: PackageOption, req: TripRequest, copy: AiCopy, company:
     `👥 ${plural(req.members, "traveller")}`,
     "",
     "*Stays*",
-    ...o.stays.map((s) => `🏨 ${s.city}: ${s.property.name} (${s.property.stars}★), ${plural(s.nights, "night")}, ${MEAL_PLAN[s.mealPlan]}`),
+    ...o.stays.map((s) => `🏨 ${s.city}: ${s.property.name} (${propertyType(s.property)}), ${plural(s.nights, "night")}, ${MEAL_PLAN[s.mealPlan]}`),
     "",
     "*Plan*",
     ...o.itinerary.map((d) => {

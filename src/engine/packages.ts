@@ -20,6 +20,17 @@ import { scheduleItinerary, type ScheduleResult } from "./itinerary";
 import { addDays, daysBetween, inr, isValidIsoDate, plural, toHHMM, toMins } from "./util";
 
 export const TIER_LABEL: Record<Tier, string> = { budget: "Budget", premium: "Premium", luxury: "Luxury" };
+
+/** "4★ Resort", or just "Resort" when no star rating is set. */
+export function propertyType(p: { stars: number; kind: string }): string {
+  return p.stars > 0 ? `${p.stars}★ ${p.kind}` : p.kind;
+}
+
+/** "2 rooms Deluxe Room + 1 extra bed" or "2 rooms (4+2 sharing) AC Room". */
+export function roomsLabel(s: StayPlan): string {
+  const share = s.sharing && s.sharing.length ? ` (${s.sharing.join("+")} sharing)` : "";
+  return `${plural(s.rooms, "room")}${share} ${s.roomType.name}${s.extraBeds ? ` + ${plural(s.extraBeds, "extra bed")}` : ""}`;
+}
 const MEAL_PLAN_LABEL = { EP: "Room only", CP: "Breakfast", MAP: "Breakfast & dinner", AP: "All meals" } as const;
 
 export function validateRequest(req: TripRequest): string[] {
@@ -241,6 +252,7 @@ function buildOption(db: Database, req: TripRequest, tier: Tier, cities: string[
       roomType: pick.room,
       rooms: pick.price.rooms,
       extraBeds: pick.price.extraBeds,
+      sharing: pick.price.sharing,
       mealPlan: pick.room.mealPlan,
       alternatives: choices.slice(1, 4).map((c) => ({ property: c.property, roomType: c.room, cost: c.price.total })),
     });
@@ -283,7 +295,7 @@ function buildOption(db: Database, req: TripRequest, tier: Tier, cities: string[
   const inclusions = [
     ...stays.map(
       (s) =>
-        `${plural(s.nights, "night")} at ${s.property.name}, ${s.city} (${s.property.stars}★ ${s.property.kind}) — ${plural(s.rooms, "room")} ${s.roomType.name}${s.extraBeds ? ` + ${plural(s.extraBeds, "extra bed")}` : ""}, ${MEAL_PLAN_LABEL[s.mealPlan]}`,
+        `${plural(s.nights, "night")} at ${s.property.name}, ${s.city} (${propertyType(s.property)}) — ${roomsLabel(s)}, ${MEAL_PLAN_LABEL[s.mealPlan]}`,
     ),
     ...(plan.kind === "private-cab" && plan.cab
       ? [`Private ${plan.cab.vehicle.ac ? "AC " : ""}${plan.cab.vehicle.vehicle}${plan.cab.count > 1 ? ` × ${plan.cab.count}` : ""} with driver for all transfers & sightseeing`]

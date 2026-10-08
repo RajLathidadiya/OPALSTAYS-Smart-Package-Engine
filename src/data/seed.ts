@@ -1,12 +1,16 @@
-// SAMPLE DATA ONLY. Property names, train numbers, timings and fares below are
-// illustrative placeholders to show how the engine works. Replace them with your
-// real contracted rates and verified timetables in Admin → Database before quoting.
+// OPALSTAYS rate database: Sasan Gir properties.
+// Hotel rates are the B2C (customer) rates from the property, + GST.
+// OPALSTAYS' B2B cost is 10% below B2C everywhere (see b2b()).
+// Seasons, meal plans marked "assumed", activity prices and road distances are
+// approximate: confirm them and edit in Admin → Database.
 import type {
   Activity,
   BusRoute,
   CabRate,
   Database,
   Distance,
+  MealPlan,
+  OccupancyRate,
   Property,
   RoomType,
   SeasonRate,
@@ -18,146 +22,217 @@ import type {
 const ALL: Tier[] = ["budget", "premium", "luxury"];
 const UP: Tier[] = ["premium", "luxury"];
 
-function seasons(id: string, b2b: number, b2c: number): SeasonRate[] {
-  // Festive and winter peaks cost more; summer is a low season.
-  const pct = (v: number, p: number) => Math.round((v * p) / 100 / 50) * 50;
-  return [
-    { id: `${id}-diwali`, name: "Diwali peak", from: "10-25", to: "11-05", b2b: pct(b2b, 135), b2c: pct(b2c, 135) },
-    { id: `${id}-winter`, name: "Winter peak", from: "12-20", to: "01-05", b2b: pct(b2b, 150), b2c: pct(b2c, 150) },
-    { id: `${id}-summer`, name: "Summer low", from: "04-15", to: "06-30", b2b: pct(b2b, 80), b2c: pct(b2c, 80) },
-  ];
+/** OPALSTAYS gets 10% off every B2C rate. */
+export const B2B_DISCOUNT = 0.1;
+export const b2b = (b2c: number) => Math.round(b2c * (1 - B2B_DISCOUNT));
+
+/** "Season" dates for properties that quote Season / Off season. Everything else is off season. */
+const SEASON_WINDOWS = [
+  { name: "Season", from: "10-20", to: "11-10" }, // Diwali holidays
+  { name: "Season", from: "12-20", to: "01-05" }, // Christmas & New Year
+];
+
+function seasonWindows(id: string, b2cRate = 0, extraBedB2c?: number): SeasonRate[] {
+  return SEASON_WINDOWS.map((w, i) => ({
+    id: `${id}-s${i}`,
+    ...w,
+    b2b: b2b(b2cRate),
+    b2c: b2cRate,
+    ...(extraBedB2c !== undefined ? { extraBedB2b: b2b(extraBedB2c), extraBedB2c } : {}),
+  }));
 }
 
-function room(
+/** Per-room pricing (rate per room per night). */
+function perRoom(
   id: string,
   name: string,
-  b2b: number,
-  b2c: number,
-  mealPlan: RoomType["mealPlan"],
-  opts: Partial<RoomType> = {},
+  b2cRate: number,
+  mealPlan: MealPlan,
+  opts: { extraBed?: number; maxOccupancy?: number; seasons?: SeasonRate[]; ac?: boolean } = {},
 ): RoomType {
+  const extraBed = opts.extraBed ?? 0;
   return {
     id,
     name,
-    ac: true,
+    pricing: "per-room",
+    occupancyRates: [],
+    ac: opts.ac ?? true,
     baseOccupancy: 2,
-    maxOccupancy: 3,
-    b2b,
-    b2c,
-    extraBedB2b: Math.round((b2b * 0.3) / 50) * 50,
-    extraBedB2c: Math.round((b2c * 0.3) / 50) * 50,
+    maxOccupancy: opts.maxOccupancy ?? (extraBed > 0 ? 3 : 2),
+    b2b: b2b(b2cRate),
+    b2c: b2cRate,
+    extraBedB2b: b2b(extraBed),
+    extraBedB2c: extraBed,
     mealPlan,
-    seasons: seasons(id, b2b, b2c),
-    ...opts,
+    seasons: opts.seasons ?? [],
   };
 }
 
-function property(p: Omit<Property, "checkIn" | "checkOut" | "active" | "rateValidTill"> & Partial<Property>): Property {
-  return { checkIn: "14:00", checkOut: "11:00", active: true, rateValidTill: "2027-03-31", ...p };
+/**
+ * Per-person ("sharing") pricing. Each row: [guests in the room, B2C rate per person, season?].
+ * Stored as the room total, e.g. 3 sharing at ₹2,200/person = ₹6,600 per night.
+ */
+function perPerson(
+  id: string,
+  name: string,
+  rows: [number, number, string?][],
+  mealPlan: MealPlan,
+  opts: { ac?: boolean; seasonal?: boolean } = {},
+): RoomType {
+  const occupancyRates: OccupancyRate[] = rows.map(([guests, perHead, season], i) => ({
+    id: `${id}-o${i}`,
+    guests,
+    b2c: perHead * guests,
+    b2b: b2b(perHead * guests),
+    ...(season ? { season } : {}),
+  }));
+  return {
+    id,
+    name,
+    pricing: "per-person",
+    occupancyRates,
+    ac: opts.ac ?? true,
+    baseOccupancy: 1,
+    maxOccupancy: Math.max(...rows.map((r) => r[0])),
+    b2b: 0,
+    b2c: 0,
+    extraBedB2b: 0,
+    extraBedB2c: 0,
+    mealPlan,
+    seasons: opts.seasonal ? seasonWindows(id) : [],
+  };
 }
 
+/** Same per-person rate for every group size in a range. */
+const range = (from: number, to: number, perHead: number, season?: string): [number, number, string?][] =>
+  Array.from({ length: to - from + 1 }, (_, i) => [from + i, perHead, season]);
+
+function property(p: Omit<Property, "checkIn" | "checkOut" | "active" | "rateValidTill" | "city" | "hotelGst"> & Partial<Property>): Property {
+  return { city: "Sasan Gir", checkIn: "12:00", checkOut: "11:00", active: true, rateValidTill: "", hotelGst: true, ...p };
+}
+
+/** Room type × meal plan grid, e.g. Wild Calm "Courtyard Room (CP)". */
+function planGrid(
+  prefix: string,
+  rooms: [string, Partial<Record<MealPlan, number>>][],
+  opts: (room: string, plan: MealPlan) => Parameters<typeof perRoom>[4],
+): RoomType[] {
+  return rooms.flatMap(([room, plans]) =>
+    (Object.entries(plans) as [MealPlan, number][]).map(([plan, rate]) =>
+      perRoom(`${prefix}-${room.toLowerCase().replace(/[^a-z]+/g, "-")}-${plan.toLowerCase()}`, `${room} (${plan})`, rate, plan, opts(room, plan)),
+    ),
+  );
+}
+
+// ---------- Wild Calm: weekday rates, weekend = Fri & Sat nights ----------
+const WILD_CALM_WEEKDAY: [string, Record<"CP" | "MAP" | "AP", number>][] = [
+  ["Courtyard Room", { CP: 5683, MAP: 6914, AP: 8524 }],
+  ["Calm Cub", { CP: 7861, MAP: 10537, AP: 12560 }],
+  ["Wild Cub", { CP: 9899, MAP: 11495, AP: 13518 }],
+  ["Calm Nest", { CP: 10644, MAP: 12240, AP: 14263 }],
+  ["Wild Nest", { CP: 11708, MAP: 13305, AP: 15326 }],
+];
+const WILD_CALM_WEEKEND: Record<string, Record<"CP" | "MAP" | "AP", number>> = {
+  "Courtyard Room": { CP: 6251, MAP: 7605, AP: 10537 },
+  "Calm Cub": { CP: 8647, MAP: 11591, AP: 13815 },
+  "Wild Cub": { CP: 10889, MAP: 12645, AP: 14869 },
+  "Calm Nest": { CP: 11708, MAP: 13464, AP: 15688 },
+  "Wild Nest": { CP: 12879, MAP: 14636, AP: 16860 },
+};
+const WILD_CALM_MATTRESS = { CP: 2661, MAP: 3634, AP: 4673 };
+
+// ---------- Glorious Gir: Off season (regular) and Season ----------
+const GLORIOUS_OFF: [string, Record<MealPlan, number>][] = [
+  ["Standard First Floor", { EP: 2200, CP: 2640, MAP: 3300, AP: 3960 }],
+  ["Premium Room", { EP: 3850, CP: 4290, MAP: 4950, AP: 5610 }],
+  ["Super Deluxe Room", { EP: 2420, CP: 3190, MAP: 3850, AP: 4510 }],
+  ["Deluxe Room", { EP: 2420, CP: 2860, MAP: 3520, AP: 4180 }],
+];
+const GLORIOUS_SEASON: Record<string, Record<MealPlan, number>> = {
+  "Standard First Floor": { EP: 2640, CP: 3080, MAP: 3740, AP: 4400 },
+  "Premium Room": { EP: 4730, CP: 5170, MAP: 5830, AP: 6490 },
+  "Super Deluxe Room": { EP: 2970, CP: 3850, MAP: 4510, AP: 5170 },
+  "Deluxe Room": { EP: 3080, CP: 3410, MAP: 4070, AP: 4730 },
+};
+
 const properties: Property[] = [
-  // ---- Udaipur ----
   property({
-    id: "udr-b1", name: "Lakeside Haveli Inn (sample)", kind: "Heritage", city: "Udaipur", area: "Gangaur Ghat",
-    stars: 3, tier: "budget", priority: 5, description: "Restored haveli with rooftop lake views, walking distance to City Palace.",
+    id: "aaranya", name: "Aaranya Gir Resort", kind: "Resort", area: "Sasan Gir", stars: 0, tier: "premium", priority: 5,
+    description: "Resort stay near the Gir forest, rooms for couples, families and groups.",
     roomTypes: [
-      room("udr-b1-std", "Standard AC Room", 2500, 3200, "CP"),
-      room("udr-b1-fam", "Family Room (4 pax)", 4200, 5400, "CP", { baseOccupancy: 4, maxOccupancy: 5 }),
-      room("udr-b1-nac", "Non-AC Room", 1700, 2200, "EP", { ac: false }),
+      // Meal plan not given in the rate sheet: assumed room only (EP).
+      perPerson("aaranya-room", "Room", [[2, 3025], [3, 2200], [4, 1980], [5, 1760], [6, 1650]], "EP"),
     ],
   }),
   property({
-    id: "udr-b2", name: "Fatehsagar View Hotel (sample)", kind: "Hotel", city: "Udaipur", area: "Fateh Sagar",
-    stars: 3, tier: "budget", priority: 3, description: "Simple, clean rooms near Fateh Sagar lake.",
-    roomTypes: [room("udr-b2-std", "Deluxe AC Room", 2300, 3000, "EP")],
+    id: "aaranya-dorm", name: "Aaranya Gir Resort (A/C Dormitory)", kind: "Resort", area: "Sasan Gir", stars: 0, tier: "budget", priority: 1,
+    description: "A/C dormitory for groups at Aaranya Gir Resort.",
+    roomTypes: [perPerson("aaranya-dorm-bed", "A/C Dormitory", range(1, 20, 1650), "EP")],
   }),
   property({
-    id: "udr-p1", name: "Aravalli Lake Resort (sample)", kind: "Resort", city: "Udaipur", area: "Lake Pichola",
-    stars: 4, tier: "premium", priority: 5, description: "Lake-facing resort with pool and Rajasthani architecture.",
+    id: "kanaiya", name: "Kanaiya Farm", kind: "Farmhouse", area: "Sasan Gir", stars: 0, tier: "budget", priority: 5,
+    description: "Farm stay amid mango orchards near Sasan Gir.",
     roomTypes: [
-      room("udr-p1-dlx", "Deluxe Room", 4500, 5800, "CP"),
-      room("udr-p1-lv", "Lake View Room", 5600, 7200, "MAP"),
+      perPerson("kanaiya-ac", "AC Room", [[2, 1925], ...range(3, 4, 1430), [2, 2475, "Season"], ...range(3, 4, 1650, "Season")], "EP", { seasonal: true }),
+      perPerson("kanaiya-nonac", "Non-AC Room", range(2, 4, 1320), "EP", { ac: false }),
     ],
   }),
   property({
-    id: "udr-l1", name: "Pichola Palace Retreat (sample)", kind: "Heritage", city: "Udaipur", area: "Lake Pichola",
-    stars: 5, tier: "luxury", priority: 5, description: "Palace-style luxury stay with boat access and spa.",
-    roomTypes: [
-      room("udr-l1-pal", "Palace Room", 9500, 12500, "CP"),
-      room("udr-l1-ste", "Lake Suite", 16000, 21000, "MAP"),
-    ],
+    id: "vanvagdo", name: "Van Vagdo Prakruti Nivas", kind: "Farmhouse", area: "Sasan Gir", stars: 0, tier: "budget", priority: 5,
+    description: "Nature stay close to the forest. Children 0–5 free, 6–10 years ₹1,100.",
+    roomTypes: [perPerson("vanvagdo-room", "Cottage", [[2, 2200], [3, 1925], [4, 1650]], "EP")],
   }),
-  // ---- Jaisalmer ----
   property({
-    id: "jsm-b1", name: "Golden Fort Guest House (sample)", kind: "Hotel", city: "Jaisalmer", area: "Fort Road",
-    stars: 3, tier: "budget", priority: 5, description: "Sandstone hotel with fort views from the rooftop.",
+    id: "gokul", name: "Gokul Farm House", kind: "Farmhouse", area: "Sasan Gir", stars: 0, tier: "budget", priority: 5,
+    description: "Farm house stay with home-style food.",
+    mealRates: { lunch: { b2b: b2b(275), b2c: 275 }, dinner: { b2b: b2b(275), b2c: 275 } },
     roomTypes: [
-      room("jsm-b1-std", "Standard AC Room", 2200, 2900, "CP"),
-      room("jsm-b1-fam", "Family Room (4 pax)", 3800, 4900, "CP", { baseOccupancy: 4, maxOccupancy: 5 }),
+      perRoom("gokul-deluxe", "Deluxe Room", 2750, "MAP", { extraBed: 1100, seasons: seasonWindows("gokul-deluxe", 4950, 1100) }),
+      perPerson("gokul-sharing", "Group / Sharing", [...range(3, 6, 1540), ...range(3, 6, 1650, "Season")], "EP", { seasonal: true }),
     ],
   }),
   property({
-    id: "jsm-p1", name: "Sam Dunes Swiss Camp (sample)", kind: "Camp", city: "Jaisalmer", area: "Sam Sand Dunes",
-    stars: 4, tier: "premium", priority: 5, description: "AC Swiss tents at the dunes with folk evening and dinner.",
-    checkIn: "13:00", checkOut: "10:00",
-    roomTypes: [room("jsm-p1-tent", "AC Swiss Tent", 4000, 5500, "MAP")],
+    id: "shreevan", name: "Shree Van Resort", kind: "Resort", area: "Sasan Gir", stars: 0, tier: "budget", priority: 5,
+    description: "Resort with rooms for couples and large families.",
+    roomTypes: [
+      perPerson(
+        "shreevan-room",
+        "Room",
+        [
+          [2, 1760], ...range(3, 4, 1540), [5, 1375], ...range(6, 7, 1100),
+          [2, 2475, "Season"], ...range(3, 4, 2200, "Season"), [5, 1980, "Season"], ...range(6, 7, 1650, "Season"),
+        ],
+        "EP",
+        { seasonal: true },
+      ),
+    ],
   }),
   property({
-    id: "jsm-l1", name: "Thar Desert Palace (sample)", kind: "Heritage", city: "Jaisalmer", area: "Sam Road",
-    stars: 5, tier: "luxury", priority: 5, description: "Luxury sandstone palace hotel with pool and desert views.",
-    roomTypes: [room("jsm-l1-dlx", "Heritage Room", 8500, 11500, "MAP")],
-  }),
-  // ---- Jodhpur ----
-  property({
-    id: "jdh-b1", name: "Blue City Homestay (sample)", kind: "Homestay", city: "Jodhpur", area: "Navchokiya",
-    stars: 3, tier: "budget", priority: 5, description: "Family-run homestay below Mehrangarh Fort.",
-    roomTypes: [room("jdh-b1-std", "AC Room", 2000, 2700, "CP")],
+    id: "kesar", name: "Kesar Villa", kind: "Villa", area: "Sasan Gir", stars: 0, tier: "budget", priority: 5,
+    description: "Simple AC rooms in a villa near Sasan.",
+    roomTypes: [perPerson("kesar-ac", "AC Room", range(2, 4, 1375), "EP")],
   }),
   property({
-    id: "jdh-p1", name: "Mehran Courtyard Hotel (sample)", kind: "Hotel", city: "Jodhpur", area: "Ratanada",
-    stars: 4, tier: "premium", priority: 5, description: "Modern 4-star with a pool and rooftop restaurant.",
-    roomTypes: [room("jdh-p1-dlx", "Deluxe Room", 4200, 5500, "CP")],
+    id: "wildcalm", name: "Wild Calm – Sasan Gir", kind: "Resort", area: "Sasan Gir", stars: 0, tier: "luxury", priority: 5,
+    description: "Boutique luxury resort with courtyard rooms, cubs and nests.",
+    roomTypes: planGrid("wildcalm", WILD_CALM_WEEKDAY, (room, plan) => {
+      const weekend = WILD_CALM_WEEKEND[room][plan as "CP" | "MAP" | "AP"];
+      const mattress = WILD_CALM_MATTRESS[plan as "CP" | "MAP" | "AP"];
+      return {
+        extraBed: mattress,
+        seasons: [{ id: `wildcalm-${room}-${plan}-we`, name: "Weekend", from: "01-01", to: "12-31", days: [5, 6], b2b: b2b(weekend), b2c: weekend }],
+      };
+    }),
   }),
   property({
-    id: "jdh-l1", name: "Umaid Heritage Villa (sample)", kind: "Villa", city: "Jodhpur", area: "Circuit House Road",
-    stars: 5, tier: "luxury", priority: 5, description: "Private heritage villa with butler service.",
-    roomTypes: [room("jdh-l1-ste", "Heritage Suite", 11000, 14500, "CP")],
-  }),
-  // ---- Mount Abu ----
-  property({
-    id: "abu-b1", name: "Nakki Lake Hotel (sample)", kind: "Hotel", city: "Mount Abu", area: "Nakki Lake",
-    stars: 3, tier: "budget", priority: 5, description: "Budget hotel a short walk from Nakki Lake.",
-    roomTypes: [room("abu-b1-std", "Deluxe Room", 2100, 2800, "CP")],
-  }),
-  property({
-    id: "abu-p1", name: "Aravalli Hills Resort (sample)", kind: "Resort", city: "Mount Abu", area: "Sunset Point Road",
-    stars: 4, tier: "premium", priority: 5, description: "Hill resort with gardens and valley views.",
-    roomTypes: [room("abu-p1-dlx", "Cottage", 4300, 5600, "MAP")],
+    id: "glorious", name: "Glorious Gir Resort", kind: "Resort", area: "Sasan Gir", stars: 0, tier: "premium", priority: 5,
+    description: "Resort with standard, deluxe, super deluxe and premium rooms.",
+    roomTypes: planGrid("glorious", GLORIOUS_OFF, (room, plan) => ({ seasons: seasonWindows(`glorious-${room}-${plan}`, GLORIOUS_SEASON[room][plan]) })),
   }),
 ];
 
-const daily = [0, 1, 2, 3, 4, 5, 6];
-
-const trains: TrainRoute[] = [
-  { id: "t1", from: "Ahmedabad", to: "Udaipur", trainNo: "SAMPLE-101", name: "Ahmedabad–Udaipur Day Express", fromStation: "Ahmedabad (ADI)", toStation: "Udaipur City (UDZ)", departs: "06:10", arrives: "11:20", dayOffset: 0, runsOn: daily, fares: { CC: 650, EC: 1300, "3A": 780, "2A": 1100 } },
-  { id: "t2", from: "Ahmedabad", to: "Udaipur", trainNo: "SAMPLE-102", name: "Udaipur Night Mail", fromStation: "Asarva (ASV)", toStation: "Udaipur City (UDZ)", departs: "22:40", arrives: "05:25", dayOffset: 1, runsOn: daily, fares: { SL: 320, "3A": 820, "2A": 1150, "1A": 1900 } },
-  { id: "t3", from: "Udaipur", to: "Ahmedabad", trainNo: "SAMPLE-103", name: "Udaipur–Ahmedabad Day Express", fromStation: "Udaipur City (UDZ)", toStation: "Ahmedabad (ADI)", departs: "14:50", arrives: "20:05", dayOffset: 0, runsOn: daily, fares: { CC: 650, EC: 1300, "3A": 780, "2A": 1100 } },
-  { id: "t4", from: "Jaisalmer", to: "Ahmedabad", trainNo: "SAMPLE-104", name: "Jaisalmer–Sabarmati Express", fromStation: "Jaisalmer (JSM)", toStation: "Sabarmati (SBIB)", departs: "13:45", arrives: "05:40", dayOffset: 1, runsOn: daily, fares: { SL: 450, "3A": 1150, "2A": 1650, "1A": 2750 } },
-  { id: "t5", from: "Ahmedabad", to: "Jodhpur", trainNo: "SAMPLE-105", name: "Marudhar Day Express", fromStation: "Ahmedabad (ADI)", toStation: "Jodhpur (JU)", departs: "06:30", arrives: "14:15", dayOffset: 0, runsOn: daily, fares: { SL: 330, "3A": 870, "2A": 1230 } },
-  { id: "t6", from: "Jodhpur", to: "Jaisalmer", trainNo: "SAMPLE-106", name: "Jodhpur–Jaisalmer Express", fromStation: "Jodhpur (JU)", toStation: "Jaisalmer (JSM)", departs: "06:00", arrives: "11:20", dayOffset: 0, runsOn: daily, fares: { SL: 230, "3A": 610, "2A": 860 } },
-  { id: "t7", from: "Jodhpur", to: "Ahmedabad", trainNo: "SAMPLE-107", name: "Jodhpur–Ahmedabad Express", fromStation: "Jodhpur (JU)", toStation: "Ahmedabad (ADI)", departs: "15:10", arrives: "23:05", dayOffset: 0, runsOn: daily, fares: { SL: 330, "3A": 870, "2A": 1230 } },
-  { id: "t8", from: "Jaisalmer", to: "Jodhpur", trainNo: "SAMPLE-108", name: "Jaisalmer–Jodhpur Express", fromStation: "Jaisalmer (JSM)", toStation: "Jodhpur (JU)", departs: "16:30", arrives: "21:50", dayOffset: 0, runsOn: daily, fares: { SL: 230, "3A": 610, "2A": 860 } },
-];
-
-const buses: BusRoute[] = [
-  { id: "b1", from: "Udaipur", to: "Jaisalmer", operator: "Desert Travels (sample)", busType: "AC Seater", ac: true, departs: "07:00", arrives: "17:30", dayOffset: 0, fare: 1100 },
-  { id: "b2", from: "Udaipur", to: "Jaisalmer", operator: "Desert Travels (sample)", busType: "AC Sleeper", ac: true, departs: "20:30", arrives: "07:00", dayOffset: 1, fare: 1300 },
-  { id: "b3", from: "Udaipur", to: "Jodhpur", operator: "Marwar Travels (sample)", busType: "AC Seater", ac: true, departs: "08:00", arrives: "13:30", dayOffset: 0, fare: 650 },
-  { id: "b4", from: "Ahmedabad", to: "Mount Abu", operator: "GSRTC Volvo (sample)", busType: "Volvo AC Seater", ac: true, departs: "07:00", arrives: "12:00", dayOffset: 0, fare: 550 },
-  { id: "b5", from: "Mount Abu", to: "Udaipur", operator: "RSRTC (sample)", busType: "AC Seater", ac: true, departs: "09:30", arrives: "13:30", dayOffset: 0, fare: 420 },
-  { id: "b6", from: "Udaipur", to: "Ahmedabad", operator: "GSRTC Volvo (sample)", busType: "Volvo AC Seater", ac: true, departs: "15:00", arrives: "20:30", dayOffset: 0, fare: 600 },
-];
+const trains: TrainRoute[] = [];
+const buses: BusRoute[] = [];
 
 const cabs: CabRate[] = [
   { id: "c1", vehicle: "Sedan (Dzire/Etios)", capacity: 4, ac: true, tiers: ["budget", "premium"], perKm: 12, minKmPerDay: 250, driverAllowancePerDay: 300, tollParkingPerDay: 200, localDayRate: 2200, transferRate: 700 },
@@ -166,46 +241,44 @@ const cabs: CabRate[] = [
   { id: "c4", vehicle: "Tempo Traveller (12 seats)", capacity: 12, ac: true, tiers: ALL, perKm: 26, minKmPerDay: 250, driverAllowancePerDay: 500, tollParkingPerDay: 400, localDayRate: 5000, transferRate: 1800 },
 ];
 
+// Approximate road distances to Sasan Gir (verify).
 const distances: Distance[] = [
-  { id: "d1", from: "Ahmedabad", to: "Udaipur", km: 260, driveHours: 4.5 },
-  { id: "d2", from: "Udaipur", to: "Jaisalmer", km: 490, driveHours: 9 },
-  { id: "d3", from: "Jaisalmer", to: "Ahmedabad", km: 620, driveHours: 11 },
-  { id: "d4", from: "Ahmedabad", to: "Jodhpur", km: 450, driveHours: 8 },
-  { id: "d5", from: "Jodhpur", to: "Jaisalmer", km: 285, driveHours: 5 },
-  { id: "d6", from: "Udaipur", to: "Jodhpur", km: 250, driveHours: 5 },
-  { id: "d7", from: "Ahmedabad", to: "Mount Abu", km: 225, driveHours: 4.5 },
-  { id: "d8", from: "Mount Abu", to: "Udaipur", km: 165, driveHours: 3.5 },
+  { id: "d1", from: "Ahmedabad", to: "Sasan Gir", km: 360, driveHours: 7 },
+  { id: "d2", from: "Rajkot", to: "Sasan Gir", km: 165, driveHours: 3.5 },
+  { id: "d3", from: "Vadodara", to: "Sasan Gir", km: 450, driveHours: 8 },
+  { id: "d4", from: "Surat", to: "Sasan Gir", km: 580, driveHours: 10 },
+  { id: "d5", from: "Junagadh", to: "Sasan Gir", km: 60, driveHours: 1.5 },
+  { id: "d6", from: "Somnath", to: "Sasan Gir", km: 45, driveHours: 1 },
+  { id: "d7", from: "Diu", to: "Sasan Gir", km: 95, driveHours: 2.5 },
+  { id: "d8", from: "Dwarka", to: "Sasan Gir", km: 290, driveHours: 6 },
 ];
 
 function act(a: Omit<Activity, "active" | "groupSize" | "pricing" | "needsCab"> & Partial<Activity>): Activity {
   return { active: true, groupSize: 1, pricing: "per-person", needsCab: true, ...a };
 }
 
+// Approximate activity prices (verify). The sanctuary is closed 16 June – 15 October.
 const activities: Activity[] = [
-  // Udaipur
-  act({ id: "a-udr-1", city: "Udaipur", name: "City Palace & Museum", category: "Sightseeing", slot: "morning", durationMins: 150, b2b: 350, b2c: 400, tiers: ALL, priority: 10, description: "Grand palace complex overlooking Lake Pichola." }),
-  act({ id: "a-udr-2", city: "Udaipur", name: "Lake Pichola Sunset Boat Ride", category: "Boating", slot: "sunset", durationMins: 60, b2b: 550, b2c: 700, tiers: ALL, priority: 9, description: "Sunset cruise past Jag Mandir and the Lake Palace." }),
-  act({ id: "a-udr-3", city: "Udaipur", name: "Saheliyon ki Bari & Fateh Sagar", category: "Sightseeing", slot: "afternoon", durationMins: 90, b2b: 50, b2c: 50, tiers: ALL, priority: 7, description: "Royal garden of fountains, then a lakeside stroll." }),
-  act({ id: "a-udr-4", city: "Udaipur", name: "Dharohar Folk Dance Show, Bagore ki Haveli", category: "Cultural", slot: "evening", durationMins: 75, b2b: 150, b2c: 200, tiers: ALL, priority: 8, needsCab: false, description: "Rajasthani folk dances and puppetry." }),
-  act({ id: "a-udr-5", city: "Udaipur", name: "Sajjangarh Monsoon Palace Sunset", category: "Sightseeing", slot: "sunset", durationMins: 90, b2b: 300, b2c: 350, tiers: ALL, priority: 6, description: "Hilltop palace with panoramic sunset views." }),
-  act({ id: "a-udr-6", city: "Udaipur", name: "Licensed Guide: Old City Walk", category: "Guide", slot: "morning", durationMins: 90, pricing: "per-group", groupSize: 10, b2b: 1200, b2c: 1500, tiers: UP, priority: 8, needsCab: false, description: "Jagdish Temple, ghats and artisan lanes with a local guide." }),
-  act({ id: "a-udr-7", city: "Udaipur", name: "Rajasthani Cooking Class", category: "Local Experience", slot: "afternoon", durationMins: 120, b2b: 1300, b2c: 1700, tiers: UP, priority: 5, needsCab: false, description: "Cook dal-baati and gatte ki sabzi with a local family." }),
-  act({ id: "a-udr-8", city: "Udaipur", name: "Private Lakeside Candle-light Dinner", category: "Local Experience", slot: "evening", durationMins: 120, pricing: "per-group", groupSize: 6, b2b: 6000, b2c: 8000, tiers: ["luxury"], priority: 9, needsCab: false, description: "Private dinner set up by the lake." }),
-  // Jaisalmer
-  act({ id: "a-jsm-1", city: "Jaisalmer", name: "Jaisalmer Fort & Jain Temples", category: "Sightseeing", slot: "morning", durationMins: 150, b2b: 100, b2c: 150, tiers: ALL, priority: 10, description: "Living sandstone fort and its intricately carved temples." }),
-  act({ id: "a-jsm-2", city: "Jaisalmer", name: "Sam Sand Dunes Camel Safari", category: "Safari", slot: "sunset", durationMins: 120, b2b: 600, b2c: 800, tiers: ALL, priority: 10, description: "Camel ride over the dunes at sunset." }),
-  act({ id: "a-jsm-3", city: "Jaisalmer", name: "Rajasthani Cultural Program & Dinner", category: "Cultural", slot: "evening", durationMins: 105, b2b: 800, b2c: 1000, tiers: ALL, priority: 9, needsCab: false, description: "Kalbeliya dance and folk music under the stars." }),
-  act({ id: "a-jsm-4", city: "Jaisalmer", name: "Patwon ki Haveli & Gadisar Lake", category: "Sightseeing", slot: "afternoon", durationMins: 120, b2b: 100, b2c: 150, tiers: ALL, priority: 7, description: "Carved havelis and the old royal reservoir." }),
-  act({ id: "a-jsm-5", city: "Jaisalmer", name: "Dune Jeep Safari", category: "Adventure", slot: "afternoon", durationMins: 90, pricing: "per-group", groupSize: 6, b2b: 2500, b2c: 3200, tiers: UP, priority: 8, description: "Dune bashing in an open 4x4." }),
-  act({ id: "a-jsm-6", city: "Jaisalmer", name: "Kuldhara Abandoned Village", category: "Sightseeing", slot: "afternoon", durationMins: 60, b2b: 50, b2c: 50, tiers: ALL, priority: 4, description: "The legendary deserted village." }),
-  // Jodhpur
-  act({ id: "a-jdh-1", city: "Jodhpur", name: "Mehrangarh Fort", category: "Sightseeing", slot: "morning", durationMins: 150, b2b: 200, b2c: 250, tiers: ALL, priority: 10, description: "One of India's largest forts with sweeping blue-city views." }),
-  act({ id: "a-jdh-2", city: "Jodhpur", name: "Jaswant Thada & Clock Tower Market", category: "Sightseeing", slot: "afternoon", durationMins: 120, b2b: 50, b2c: 50, tiers: ALL, priority: 8, description: "Marble cenotaph, then spices and textiles at Sardar Market." }),
-  act({ id: "a-jdh-3", city: "Jodhpur", name: "Flying Fox Zipline", category: "Adventure", slot: "afternoon", durationMins: 90, b2b: 1900, b2c: 2300, tiers: UP, priority: 6, description: "Six ziplines over the fort's ramparts." }),
-  // Mount Abu
-  act({ id: "a-abu-1", city: "Mount Abu", name: "Dilwara Jain Temples", category: "Sightseeing", slot: "morning", durationMins: 120, b2b: 0, b2c: 0, tiers: ALL, priority: 10, description: "Marble temples famed for their carving." }),
-  act({ id: "a-abu-2", city: "Mount Abu", name: "Nakki Lake Boating", category: "Boating", slot: "afternoon", durationMins: 60, b2b: 150, b2c: 200, tiers: ALL, priority: 8, needsCab: false, description: "Paddle boats on the hill-top lake." }),
-  act({ id: "a-abu-3", city: "Mount Abu", name: "Sunset Point", category: "Sightseeing", slot: "sunset", durationMins: 60, b2b: 0, b2c: 0, tiers: ALL, priority: 9, description: "Classic sunset over the Aravallis." }),
+  act({
+    id: "a-gir-1", city: "Sasan Gir", name: "Gir Jungle Trail – Lion Safari (Gypsy)", category: "Safari", slot: "early", durationMins: 180,
+    pricing: "per-group", groupSize: 6, b2b: 4800, b2c: 5500, tiers: ALL, priority: 10, needsCab: false,
+    description: "Open gypsy safari from Sinh Sadan with permit and guide (up to 6 people). Permits must be booked in advance.",
+  }),
+  act({
+    id: "a-gir-2", city: "Sasan Gir", name: "Devalia Safari Park", category: "Safari", slot: "afternoon", durationMins: 90,
+    b2b: 200, b2c: 250, tiers: ["budget"], priority: 9,
+    description: "Gir Interpretation Zone bus safari: lions, leopards and deer in a fenced park.",
+  }),
+  act({
+    id: "a-gir-3", city: "Sasan Gir", name: "Somnath Temple & Evening Aarti", category: "Sightseeing", slot: "sunset", durationMins: 150,
+    b2b: 0, b2c: 0, tiers: ALL, priority: 7,
+    description: "Leave by 16:00 for Somnath Jyotirlinga by the sea (45 km); evening aarti at 19:00.",
+  }),
+  act({
+    id: "a-gir-4", city: "Sasan Gir", name: "Private Jeep Safari at Devalia", category: "Safari", slot: "afternoon", durationMins: 90,
+    pricing: "per-group", groupSize: 6, b2b: 3000, b2c: 3500, tiers: UP, priority: 9.5,
+    description: "Private gypsy instead of the bus at Devalia Safari Park.",
+  }),
 ];
 
 export const defaultSettings: Settings = {

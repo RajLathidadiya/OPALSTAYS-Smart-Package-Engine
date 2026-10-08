@@ -7,16 +7,13 @@ export function defaultRequest(): TripRequest {
   return {
     customerName: "",
     origin: "Ahmedabad",
-    destinations: [
-      { city: "Udaipur", nights: 0 },
-      { city: "Jaisalmer", nights: 0 },
-    ],
+    destinations: [{ city: "Sasan Gir", nights: 0 }],
     members: 4,
-    startDate: "2026-10-15",
-    endDate: "2026-10-18",
-    budget: 35000,
+    startDate: "2026-11-20",
+    endDate: "2026-11-22",
+    budget: 30000,
     acRequired: true,
-    meals: { breakfast: true, lunch: false, dinner: false },
+    meals: { breakfast: true, lunch: false, dinner: true },
     preferredTier: "premium",
     notes: "",
   };
