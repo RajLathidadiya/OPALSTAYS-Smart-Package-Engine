@@ -25,6 +25,7 @@ OPALSTAYS Database → Pricing Engine → Transport/Timing rules → Itinerary s
 - **Customer quote:** print or save as PDF, and copy WhatsApp text.
 - **Saved quotes** with status (draft/sent/confirmed/lost) and confirmed profit.
 - **Backup / restore** the whole database as a JSON file.
+- **Team sharing:** publish one encrypted rate file and the whole team quotes from the same rates.
 
 ## Run locally
 
@@ -43,10 +44,18 @@ npm run build      # production build in dist/
 2. In GitHub, go to **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 3. The workflow `.github/workflows/deploy.yml` tests, builds and deploys. The site URL appears in the Actions run.
 
+## Share with your team (same rates for everyone)
+
+1. The owner fills in the real rates in **Admin**.
+2. Go to **Admin → Backup → Share with team**, choose a team password (8+ characters), and click **Download team-data.json**.
+3. On GitHub, open the `public` folder, then **Add file → Upload files**, drop `team-data.json`, and **Commit changes**.
+4. Wait about 2 minutes. Everyone who opens the link is asked for the team password once per device and then gets the new rates. Do steps 2–3 again whenever rates change.
+
+`team-data.json` is encrypted (AES-256-GCM, key from the password with PBKDF2). Without the password nobody can read the rates, even if the repo is public. Saved quotes stay on each person's own device. Rate edits made on a staff computer stay on that computer and are replaced at the next publish, so keep rate editing with one person.
+
 Things to know:
 
-- **Your data stays in your browser** (localStorage), not on GitHub. Each browser or computer has its own copy. Use **Admin → Backup** to move data between them, and download a backup regularly.
-- The *code and sample data* on a Pages site are public, even if nobody knows the link. Your real rates are not, because you enter them in the browser. Don't commit real rates into `src/data/seed.ts` if the repo or site is public.
+- The *code* on a Pages site is public. Never commit real rates unencrypted (for example into `src/data/seed.ts`).
 - GitHub Pages from a **private** repo needs a paid GitHub plan. You can also just run it locally.
 
 ## AI (optional)

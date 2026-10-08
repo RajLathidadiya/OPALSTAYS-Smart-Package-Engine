@@ -8,6 +8,9 @@ import { OptionsPage } from "./ui/OptionsPage";
 import { PackagePage } from "./ui/PackagePage";
 import { HistoryPage } from "./ui/HistoryPage";
 import { AdminPage } from "./ui/admin/AdminPage";
+import { LockScreen } from "./ui/LockScreen";
+import { decryptEnvelope, fetchTeamEnvelope, getSyncedVersion, getTeamPassword, setSyncedVersion, setTeamPassword, type TeamEnvelope } from "./store/team";
+import { formatDate } from "./engine/util";
 
 type Route =
   | { page: "new" }
@@ -51,6 +54,7 @@ export default function App() {
   const [customerMode, setCustomerMode] = useState(readMode);
   const [draft, setDraft] = useState<TripRequest | undefined>();
   const [saveError, setSaveError] = useState(false);
+  const [team, setTeam] = useState<{ status: "checking" | "none" | "locked" | "ready"; env?: TeamEnvelope; notice?: string }>({ status: "checking" });
   const adminMode = !customerMode;
 
   useEffect(() => {
@@ -63,6 +67,36 @@ export default function App() {
     setDb(next);
     setSaveError(!saveDb(next));
   };
+
+  /** Load the team file if it is newer than what this browser has. Throws on a wrong password. */
+  const applyTeamFile = async (env: TeamEnvelope, password: string) => {
+    let notice: string | undefined;
+    if (env.publishedAt !== getSyncedVersion()) {
+      updateDb(await decryptEnvelope(env, password));
+      setSyncedVersion(env.publishedAt);
+      notice = `Team rates updated (published ${formatDate(env.publishedAt.slice(0, 10))}).`;
+    }
+    setTeamPassword(password);
+    setTeam({ status: "ready", env, notice });
+  };
+
+  useEffect(() => {
+    (async () => {
+      const env = await fetchTeamEnvelope();
+      if (!env) return setTeam({ status: "none" });
+      const saved = getTeamPassword();
+      if (saved) {
+        try {
+          await applyTeamFile(env, saved);
+          return;
+        } catch {
+          /* password changed: ask again */
+        }
+      }
+      setTeam({ status: "locked", env });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const updateQuotes = (next: SavedQuote[]) => {
     setQuotes(next);
     setSaveError(!saveQuotes(next));
@@ -93,9 +127,15 @@ export default function App() {
   const quote = route.page === "quote" ? quotes.find((q) => q.id === route.id) : undefined;
   const option = quote && route.page === "quote" && route.tier ? quote.result.options.find((o) => o.tier === route.tier) : undefined;
 
+  if (team.status === "checking") return <div className="main muted">Loading…</div>;
+  if (team.status === "locked" && team.env) {
+    const env = team.env;
+    return <LockScreen company={db.settings.companyName} onUnlock={(pw) => applyTeamFile(env, pw)} />;
+  }
+
   let body: JSX.Element;
   if (route.page === "admin" && adminMode) {
-    body = <AdminPage db={db} onChange={updateDb} />;
+    body = <AdminPage db={db} onChange={updateDb} teamPublishedAt={team.env?.publishedAt} />;
   } else if (route.page === "history" && adminMode) {
     body = <HistoryPage quotes={quotes} onOpen={(id) => go(`quote/${id}`)} onUpdate={updateQuote} onDelete={(id) => updateQuotes(quotes.filter((q) => q.id !== id))} />;
   } else if (route.page === "quote" && quote && option) {
@@ -162,6 +202,13 @@ export default function App() {
       </header>
       <main className="main">
         {saveError && <div className="alert bad no-print" style={{ marginBottom: "1rem" }}>Could not save to browser storage. Download a backup from Admin → Backup.</div>}
+        {team.notice && (
+          <div className="alert good no-print row" style={{ marginBottom: "1rem" }}>
+            <span>{team.notice}</span>
+            <div className="spacer" />
+            <button className="btn small" onClick={() => setTeam({ ...team, notice: undefined })}>OK</button>
+          </div>
+        )}
         {body}
       </main>
     </>
