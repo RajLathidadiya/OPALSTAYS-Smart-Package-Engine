@@ -1,2 +1,2 @@
-Upload `team-data.json` here (Admin → Backup → Share with team in the app).
-The file is encrypted with your team password.
+`team-data.json` holds the encrypted rates and logins. Replace it with the file
+from Admin → Team & logins → Download team-data.json.

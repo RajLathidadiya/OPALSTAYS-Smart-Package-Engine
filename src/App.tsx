@@ -8,8 +8,21 @@ import { OptionsPage } from "./ui/OptionsPage";
 import { PackagePage } from "./ui/PackagePage";
 import { HistoryPage } from "./ui/HistoryPage";
 import { AdminPage } from "./ui/admin/AdminPage";
-import { LockScreen } from "./ui/LockScreen";
-import { decryptEnvelope, fetchTeamEnvelope, getSyncedVersion, getTeamPassword, setSyncedVersion, setTeamPassword, type TeamEnvelope } from "./store/team";
+import { LoginScreen } from "./ui/LoginScreen";
+import {
+  clearLogin,
+  decryptTeamDb,
+  fetchTeamFile,
+  getStoredLogin,
+  getSyncedVersion,
+  hasUnpublished,
+  resume,
+  setSyncedVersion,
+  setUnpublished,
+  storeLogin,
+  type Session,
+  type TeamFile,
+} from "./store/team";
 import { formatDate } from "./engine/util";
 
 type Route =
@@ -54,8 +67,13 @@ export default function App() {
   const [customerMode, setCustomerMode] = useState(readMode);
   const [draft, setDraft] = useState<TripRequest | undefined>();
   const [saveError, setSaveError] = useState(false);
-  const [team, setTeam] = useState<{ status: "checking" | "none" | "locked" | "ready"; env?: TeamEnvelope; notice?: string }>({ status: "checking" });
-  const adminMode = !customerMode;
+  const [team, setTeam] = useState<{ status: "checking" | "none" | "login" | "ready"; file?: TeamFile; session?: Session; notice?: string }>({
+    status: "checking",
+  });
+  // Without a published team file the app runs in single-user mode with full access.
+  const isAdmin = team.status === "none" || team.session?.user.role === "admin";
+  const adminMode = isAdmin && !customerMode;
+  const userName = team.session?.user.name;
 
   useEffect(() => {
     const onHash = () => setRoute(parseHash());
@@ -68,35 +86,45 @@ export default function App() {
     setSaveError(!saveDb(next));
   };
 
-  /** Load the team file if it is newer than what this browser has. Throws on a wrong password. */
-  const applyTeamFile = async (env: TeamEnvelope, password: string) => {
+  /** Start a logged-in session and pull newer team rates into this browser. */
+  const startSession = async (file: TeamFile, session: Session) => {
     let notice: string | undefined;
-    if (env.publishedAt !== getSyncedVersion()) {
-      updateDb(await decryptEnvelope(env, password));
-      setSyncedVersion(env.publishedAt);
-      notice = `Team rates updated (published ${formatDate(env.publishedAt.slice(0, 10))}).`;
+    const keepLocalEdits = session.user.role === "admin" && hasUnpublished();
+    if (file.publishedAt !== getSyncedVersion() && !keepLocalEdits) {
+      updateDb(await decryptTeamDb(file, session.dataKey));
+      setSyncedVersion(file.publishedAt);
+      notice = `Rates updated (published ${formatDate(file.publishedAt.slice(0, 10))}).`;
     }
-    setTeamPassword(password);
-    setTeam({ status: "ready", env, notice });
+    setTeam({ status: "ready", file, session, notice });
   };
 
   useEffect(() => {
     (async () => {
-      const env = await fetchTeamEnvelope();
-      if (!env) return setTeam({ status: "none" });
-      const saved = getTeamPassword();
-      if (saved) {
+      const file = await fetchTeamFile();
+      if (!file) return setTeam({ status: "none" });
+      const saved = getStoredLogin();
+      const session = saved ? await resume(file, saved) : undefined;
+      if (session) {
         try {
-          await applyTeamFile(env, saved);
+          await startSession(file, session);
           return;
         } catch {
-          /* password changed: ask again */
+          /* damaged file or key: log in again */
         }
       }
-      setTeam({ status: "locked", env });
+      clearLogin();
+      setTeam({ status: "login", file });
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const logout = () => {
+    clearLogin();
+    setCustomerMode(false);
+    writeMode(false);
+    setTeam({ status: "login", file: team.file });
+  };
+
   const updateQuotes = (next: SavedQuote[]) => {
     setQuotes(next);
     setSaveError(!saveQuotes(next));
@@ -118,7 +146,7 @@ export default function App() {
 
   const generate = (req: TripRequest) => {
     const result = generateQuote(db, req);
-    const saved: SavedQuote = { id: uid("q"), savedAt: new Date().toISOString(), result, status: "draft", copies: {} };
+    const saved: SavedQuote = { id: uid("q"), savedAt: new Date().toISOString(), result, status: "draft", copies: {}, createdBy: userName };
     updateQuotes([saved, ...quotes]);
     setDraft(req);
     go(`quote/${saved.id}`);
@@ -128,16 +156,45 @@ export default function App() {
   const option = quote && route.page === "quote" && route.tier ? quote.result.options.find((o) => o.tier === route.tier) : undefined;
 
   if (team.status === "checking") return <div className="main muted">Loading…</div>;
-  if (team.status === "locked" && team.env) {
-    const env = team.env;
-    return <LockScreen company={db.settings.companyName} onUnlock={(pw) => applyTeamFile(env, pw)} />;
+  if (team.status === "login" && team.file) {
+    const file = team.file;
+    return (
+      <LoginScreen
+        company={db.settings.companyName}
+        file={file}
+        onLogin={async (session, kek) => {
+          storeLogin(session.user.id, kek);
+          await startSession(file, session);
+          go("new");
+        }}
+      />
+    );
   }
 
   let body: JSX.Element;
   if (route.page === "admin" && adminMode) {
-    body = <AdminPage db={db} onChange={updateDb} teamPublishedAt={team.env?.publishedAt} />;
-  } else if (route.page === "history" && adminMode) {
-    body = <HistoryPage quotes={quotes} onOpen={(id) => go(`quote/${id}`)} onUpdate={updateQuote} onDelete={(id) => updateQuotes(quotes.filter((q) => q.id !== id))} />;
+    body = (
+      <AdminPage
+        db={db}
+        onChange={(next) => {
+          updateDb(next);
+          if (team.file) setUnpublished(true);
+        }}
+        teamFile={team.file}
+        session={team.session}
+        onPublished={(file, session) => setTeam({ status: "ready", file, session })}
+      />
+    );
+  } else if (route.page === "history" && !customerMode) {
+    body = (
+      <HistoryPage
+        quotes={quotes}
+        showProfit={adminMode}
+        onOpen={(id) => go(`quote/${id}`)}
+        onUpdate={updateQuote}
+        onDelete={(id) => updateQuotes(quotes.filter((q) => q.id !== id))}
+      />
+    );
   } else if (route.page === "quote" && quote && option) {
     body = (
       <PackagePage
@@ -173,10 +230,10 @@ export default function App() {
     );
   }
 
-  const nav: { path: string; label: string; page: Route["page"]; admin?: boolean }[] = [
-    { path: "new", label: "New quote", page: "new" },
-    { path: "history", label: "Saved quotes", page: "history", admin: true },
-    { path: "admin", label: "Admin / Database", page: "admin", admin: true },
+  const nav: { path: string; label: string; page: Route["page"]; show: boolean }[] = [
+    { path: "new", label: "New quote", page: "new", show: true },
+    { path: "history", label: "Saved quotes", page: "history", show: !customerMode },
+    { path: "admin", label: "Admin / Database", page: "admin", show: adminMode },
   ];
 
   return (
@@ -188,7 +245,7 @@ export default function App() {
         </div>
         <nav className="nav">
           {nav
-            .filter((n) => adminMode || !n.admin)
+            .filter((n) => n.show)
             .map((n) => (
               <button key={n.path} className={route.page === n.page ? "active" : ""} onClick={() => go(n.path)}>
                 {n.label}
@@ -196,12 +253,27 @@ export default function App() {
             ))}
         </nav>
         <div className="spacer" />
-        <button className="btn small" onClick={toggleMode} title="Customer mode hides all costs and profit">
-          {customerMode ? "🔒 Customer mode" : "👁 Admin mode"}
-        </button>
+        {isAdmin && (
+          <button className="btn small" onClick={toggleMode} title="Customer mode hides all costs and profit">
+            {customerMode ? "🔒 Customer mode" : "👁 Admin mode"}
+          </button>
+        )}
+        {team.session && (
+          <>
+            <span className="muted" style={{ fontSize: "0.85rem" }}>{team.session.user.name}</span>
+            <button className="btn small" onClick={logout}>
+              Logout
+            </button>
+          </>
+        )}
       </header>
       <main className="main">
         {saveError && <div className="alert bad no-print" style={{ marginBottom: "1rem" }}>Could not save to browser storage. Download a backup from Admin → Backup.</div>}
+        {adminMode && team.file && hasUnpublished() && (
+          <div className="alert warn no-print row" style={{ marginBottom: "1rem" }}>
+            <span>You changed rates. Your team gets them only after you publish (Admin → Team).</span>
+          </div>
+        )}
         {team.notice && (
           <div className="alert good no-print row" style={{ marginBottom: "1rem" }}>
             <span>{team.notice}</span>

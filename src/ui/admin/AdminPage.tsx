@@ -4,13 +4,15 @@ import { TIERS } from "../../engine/types";
 import { uid } from "../../engine/util";
 import { TIER_LABEL } from "../../engine/packages";
 import { downloadJson, getApiKey, getPin, loadQuotes, parseBackup, resetDb, setApiKey, setPin } from "../../store/db";
-import { encryptDb, getTeamPassword, setSyncedVersion, setTeamPassword, TEAM_FILE } from "../../store/team";
 import { formatDate } from "../../engine/util";
+import { TeamManager } from "./TeamManager";
+import type { Session, TeamFile } from "../../store/team";
 import { EditableTable } from "./EditableTable";
 import { PropertiesEditor } from "./PropertiesEditor";
 
-type Section = "properties" | "transport" | "activities" | "settings" | "backup";
+type Section = "properties" | "transport" | "activities" | "settings" | "team" | "backup";
 const SECTIONS: { id: Section; label: string }[] = [
+  { id: "team", label: "Team & logins" },
   { id: "properties", label: "Properties" },
   { id: "transport", label: "Transport" },
   { id: "activities", label: "Activities" },
@@ -20,7 +22,13 @@ const SECTIONS: { id: Section; label: string }[] = [
 
 const CATEGORIES: ActivityCategory[] = ["Sightseeing", "Safari", "Boating", "Adventure", "Cultural", "Entry Ticket", "Guide", "Local Experience"];
 
-export function AdminPage(props: { db: Database; onChange: (db: Database) => void; teamPublishedAt?: string }) {
+export function AdminPage(props: {
+  db: Database;
+  onChange: (db: Database) => void;
+  teamFile?: TeamFile;
+  session?: Session;
+  onPublished: (file: TeamFile, session: Session) => void;
+}) {
   const [section, setSection] = useState<Section>("properties");
   const { db } = props;
   const patch = (p: Partial<Database>) => props.onChange({ ...db, ...p });
@@ -36,9 +44,9 @@ export function AdminPage(props: { db: Database; onChange: (db: Database) => voi
       </div>
       <div className="muted" style={{ fontSize: "0.85rem" }}>
         Changes save automatically in this browser.
-        {props.teamPublishedAt
-          ? ` Team rates last published ${formatDate(props.teamPublishedAt.slice(0, 10))}. To give your changes to the team, use Backup → Share with team.`
-          : " To give these rates to your team, use Backup → Share with team."}
+        {props.teamFile
+          ? ` Team rates last published ${formatDate(props.teamFile.publishedAt.slice(0, 10))}. To give your changes to the team, use Team & logins → Publish.`
+          : " To give these rates to your team, use Team & logins."}
       </div>
 
       {section === "properties" && <PropertiesEditor rows={db.properties} onChange={(properties) => patch({ properties })} />}
@@ -144,12 +152,8 @@ export function AdminPage(props: { db: Database; onChange: (db: Database) => voi
       )}
 
       {section === "settings" && <SettingsEditor settings={db.settings} onChange={(settings) => patch({ settings })} />}
-      {section === "backup" && (
-        <>
-          <ShareWithTeam db={db} />
-          <Backup db={db} onChange={props.onChange} />
-        </>
-      )}
+      {section === "team" && <TeamManager db={db} file={props.teamFile} session={props.session} onPublished={props.onPublished} />}
+      {section === "backup" && <Backup db={db} onChange={props.onChange} />}
     </div>
   );
 }
@@ -336,62 +340,3 @@ function Backup({ db, onChange }: { db: Database; onChange: (db: Database) => vo
   );
 }
 
-function ShareWithTeam({ db }: { db: Database }) {
-  const [pw, setPw] = useState(getTeamPassword());
-  const [pw2, setPw2] = useState(getTeamPassword());
-  const [msg, setMsg] = useState("");
-  const [busy, setBusy] = useState(false);
-  const tooShort = pw.length < 8;
-
-  const publish = async () => {
-    setBusy(true);
-    try {
-      const env = await encryptDb(db, pw);
-      downloadJson(TEAM_FILE, env);
-      setTeamPassword(pw);
-      setSyncedVersion(env.publishedAt);
-      setMsg(`${TEAM_FILE} downloaded. Now upload it to GitHub (steps below).`);
-    } catch {
-      setMsg("Could not create the file. Use a modern browser on https or localhost.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="card stack">
-      <h3>Share with team</h3>
-      <p className="muted">
-        Creates <code>{TEAM_FILE}</code>: all properties, transport, activities and pricing settings, locked with a team password. Saved quotes and
-        your AI key are not included.
-      </p>
-      <div className="grid grid-2">
-        <label className="field">
-          Team password (min 8 characters)
-          <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" />
-        </label>
-        <label className="field">
-          Repeat password
-          <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} autoComplete="new-password" />
-        </label>
-      </div>
-      {pw && tooShort && <div className="alert warn">Use at least 8 characters.</div>}
-      {pw2 && pw !== pw2 && <div className="alert warn">Passwords do not match.</div>}
-      <div>
-        <button className="btn primary" disabled={busy || tooShort || pw !== pw2} onClick={publish}>
-          {busy ? "Creating…" : `Download ${TEAM_FILE}`}
-        </button>
-      </div>
-      {msg && <div className="alert good">{msg}</div>}
-      <ol style={{ margin: 0, paddingLeft: "1.2rem" }}>
-        <li>On GitHub, open your repository, then the <strong>public</strong> folder.</li>
-        <li>Click <strong>Add file → Upload files</strong>, drop <code>{TEAM_FILE}</code>, and click <strong>Commit changes</strong> (replace the old one if asked).</li>
-        <li>Wait about 2 minutes. Everyone opening the link gets the new rates automatically.</li>
-        <li>Give the team password to your staff in person or on WhatsApp. They enter it once per device.</li>
-      </ol>
-      <p className="muted" style={{ fontSize: "0.85rem" }}>
-        Changes made on a staff member's computer stay on that computer and are replaced when you publish again. Keep rate editing with one person.
-      </p>
-    </div>
-  );
-}

@@ -25,7 +25,7 @@ OPALSTAYS Database → Pricing Engine → Transport/Timing rules → Itinerary s
 - **Customer quote:** print or save as PDF, and copy WhatsApp text.
 - **Saved quotes** with status (draft/sent/confirmed/lost) and confirmed profit.
 - **Backup / restore** the whole database as a JSON file.
-- **Team sharing:** publish one encrypted rate file and the whole team quotes from the same rates.
+- **Team logins (Admin / Staff):** one encrypted rate file for everyone; staff never see cost or profit.
 
 ## Run locally
 
@@ -44,14 +44,18 @@ npm run build      # production build in dist/
 2. In GitHub, go to **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 3. The workflow `.github/workflows/deploy.yml` tests, builds and deploys. The site URL appears in the Actions run.
 
-## Share with your team (same rates for everyone)
+## Team logins
 
-1. The owner fills in the real rates in **Admin**.
-2. Go to **Admin → Backup → Share with team**, choose a team password (8+ characters), and click **Download team-data.json**.
-3. On GitHub, open the `public` folder, then **Add file → Upload files**, drop `team-data.json`, and **Commit changes**.
-4. Wait about 2 minutes. Everyone who opens the link is asked for the team password once per device and then gets the new rates. Do steps 2–3 again whenever rates change.
+Everyone logs in with their own **User ID + password**.
 
-`team-data.json` is encrypted (AES-256-GCM, key from the password with PBKDF2). Without the password nobody can read the rates, even if the repo is public. Saved quotes stay on each person's own device. Rate edits made on a staff computer stay on that computer and are replaced at the next publish, so keep rate editing with one person.
+- **Admin**: everything, including cost, profit, rate editing and managing logins.
+- **Staff**: makes quotes and sees customer prices only. No cost, profit or Admin.
+
+Rates and logins live in `public/team-data.json`. The file is encrypted: the database is locked with a random key (AES-256-GCM), and that key is stored once per user, locked with a key derived from the user's own password (PBKDF2-SHA256). Without a valid login nobody can read it, even though the file is public.
+
+**After you change rates or logins:** go to **Admin → Team & logins → Download team-data.json**. Then on GitHub open the `public` folder, use **Add file → Upload files**, and **Commit changes**. The site redeploys and everyone gets the update.
+
+Saved quotes stay on each person's own device. Hiding cost and profit from staff is done in the app's screens; a technical person with a staff login could still decode the rates from the file.
 
 Things to know:
 

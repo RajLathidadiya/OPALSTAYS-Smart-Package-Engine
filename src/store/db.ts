@@ -71,6 +71,7 @@ export interface SavedQuote {
   chosenTier?: Tier;
   copies: Partial<Record<Tier, AiCopy>>;
   status: "draft" | "sent" | "confirmed" | "lost";
+  createdBy?: string;
 }
 
 export function loadQuotes(): SavedQuote[] {
