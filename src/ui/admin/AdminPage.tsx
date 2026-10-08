@@ -128,7 +128,7 @@ export function AdminPage(props: {
       {section === "activities" && (
         <EditableTable<Activity>
           title="Activities, tickets & guides"
-          hint="Slot: morning 09:30–13:00, afternoon 14:00–17:00, sunset 17:15–19:00, evening 19:15–21:00. Higher priority is scheduled first. Needs cab = adds a local sightseeing cab that day."
+          hint="Slot: early 06:00–09:30 (safari), morning 09:30–13:00, afternoon 14:00–17:00, sunset 17:15–19:00, evening 19:15–21:00. Higher priority is scheduled first. Needs cab = adds a local sightseeing cab that day."
           rows={db.activities}
           onChange={(activities) => patch({ activities })}
           newRow={() => ({ id: uid("act"), city: "", name: "", category: "Sightseeing", slot: "morning", durationMins: 120, pricing: "per-person", groupSize: 1, b2b: 0, b2c: 0, tiers: ["budget", "premium", "luxury"], priority: 5, needsCab: true, active: true, description: "" })}
@@ -137,7 +137,7 @@ export function AdminPage(props: {
             { key: "city", label: "City", type: "text", width: "7rem" },
             { key: "name", label: "Name", type: "text", width: "13rem" },
             { key: "category", label: "Category", type: "select", options: CATEGORIES },
-            { key: "slot", label: "Slot", type: "select", options: ["morning", "afternoon", "sunset", "evening"] },
+            { key: "slot", label: "Slot", type: "select", options: ["early", "morning", "afternoon", "sunset", "evening"] },
             { key: "durationMins", label: "Mins", type: "number", width: "4rem" },
             { key: "pricing", label: "Pricing", type: "select", options: ["per-person", "per-group"] },
             { key: "groupSize", label: "Group", type: "number", width: "3.5rem" },

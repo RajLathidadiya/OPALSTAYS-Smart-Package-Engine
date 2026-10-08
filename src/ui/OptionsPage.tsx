@@ -1,5 +1,5 @@
 import type { PackageOption, Tier } from "../engine/types";
-import { TIER_LABEL } from "../engine/packages";
+import { TIER_LABEL, propertyType } from "../engine/packages";
 import { formatDate, inr, plural } from "../engine/util";
 import type { SavedQuote } from "../store/db";
 
@@ -103,7 +103,7 @@ function OptionCard(props: { option: PackageOption; recommended: boolean; adminM
       <ul>
         {o.stays.map((s) => (
           <li key={s.city}>
-            {s.city}: {s.property.name} ({s.property.stars}★), {plural(s.nights, "night")}
+            {s.city}: {s.property.name} ({propertyType(s.property)}), {plural(s.nights, "night")}
           </li>
         ))}
         <li>

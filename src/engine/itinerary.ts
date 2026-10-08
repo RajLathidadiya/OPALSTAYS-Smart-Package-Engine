@@ -6,6 +6,7 @@ import { MEALS_IN_PLAN } from "./types";
 import { addDays, ceilQuarter, daysBetween, sameCity, toHHMM, toMins } from "./util";
 
 const SLOTS: Record<Slot, [number, number]> = {
+  early: [toMins("06:00"), toMins("09:30")], // e.g. jungle safari
   morning: [toMins("09:30"), toMins("13:00")],
   afternoon: [toMins("14:00"), toMins("17:00")],
   sunset: [toMins("17:15"), toMins("19:00")],
@@ -13,7 +14,7 @@ const SLOTS: Record<Slot, [number, number]> = {
 };
 const SLOT_OVERRUN = 45; // an activity may finish this many minutes after its slot ends
 const GAP = 20; // travel buffer between activities
-const DAY_START = toMins("09:30");
+const DAY_START = toMins("06:00"); // only "early" activities use time before 09:30
 const DAY_END = toMins("21:30");
 
 export interface ScheduledActivity {
@@ -155,7 +156,10 @@ export function scheduleItinerary(opts: {
         // On a travel morning, breakfast comes before checkout.
         const leaving = legs.find((l) => l.date === morning);
         const latest = leaving ? toMins(leaving.departs) - (leaving.mode === "cab" ? 45 : 105) : toMins("08:30");
-        const time = Math.min(toMins("08:30"), latest);
+        // After an early activity (safari), breakfast follows it.
+        const early = (busy.get(morning) ?? []).filter(([st]) => st < toMins("09:30"));
+        const afterEarly = early.length ? Math.max(...early.map(([, e]) => e)) + 15 : 0;
+        const time = afterEarly ? Math.min(afterEarly, latest) : Math.min(toMins("08:30"), latest);
         add(morning, Math.max(time, toMins("05:30")), time < toMins("06:30") ? "Packed breakfast" : `Breakfast ${where("breakfast")}`.trim(), "meal");
       }
       if (wantedMeals.lunch || inPlan.includes("lunch")) add(morning, toMins("13:15"), `Lunch ${where("lunch")}`.trim(), "meal");

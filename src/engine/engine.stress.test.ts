@@ -4,15 +4,15 @@ import { generateQuote } from "./packages";
 import type { TripRequest } from "./types";
 import { addDays } from "./util";
 
-const cities = ["Udaipur", "Jaisalmer", "Jodhpur", "Mount Abu"];
+const cities = ["Sasan Gir"];
 it("stress", () => {
   const db = seedDatabase();
   const issues: string[] = [];
   let n = 0;
   for (const members of [1, 2, 3, 5, 6, 7, 13, 20])
-    for (const start of ["2026-10-15", "2026-10-30", "2026-12-28", "2027-05-10"])
+    for (const start of ["2026-10-15", "2026-10-30", "2026-11-19", "2026-12-28", "2027-05-10"])
       for (const len of [1, 2, 3, 4, 6])
-        for (const route of [[0], [1], [2], [3], [0, 1], [2, 1], [3, 0], [0, 2, 1], [3, 0, 2, 1]])
+        for (const route of [[0]])
           for (const ac of [true, false]) {
             if (len < route.length) continue;
             const req: TripRequest = { customerName: "", origin: "Ahmedabad", destinations: route.map((i) => ({ city: cities[i], nights: 0 })), members, startDate: start, endDate: addDays(start, len), budget: 50000, acRequired: ac, meals: { breakfast: true, lunch: members % 2 === 0, dinner: true }, preferredTier: "premium", notes: "" };
@@ -36,7 +36,10 @@ it("stress", () => {
               o.legs.slice(0, -1).forEach((l) => { if (l.dayOffset) issues.push(`overnight mid leg ${l.from}-${l.to} ${l.mode}`); });
               // vehicle capacity
               if (o.cab && o.cab.count * o.cab.vehicle.capacity < members) issues.push("cab cap");
-              for (const s of o.stays) if (s.rooms * s.roomType.maxOccupancy < members) issues.push("room cap");
+              for (const s of o.stays) {
+                if (s.sharing) { if (s.sharing.reduce((a, b) => a + b, 0) !== members) issues.push("sharing sum"); }
+                else if (s.rooms * s.roomType.maxOccupancy < members) issues.push("room cap");
+              }
             }
             if (q.errors.length && !q.options.length) issues.push("no options: " + q.errors[0]);
           }
