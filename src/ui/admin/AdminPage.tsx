@@ -4,11 +4,15 @@ import { TIERS } from "../../engine/types";
 import { uid } from "../../engine/util";
 import { TIER_LABEL } from "../../engine/packages";
 import { downloadJson, getApiKey, getPin, loadQuotes, parseBackup, resetDb, setApiKey, setPin } from "../../store/db";
+import { formatDate } from "../../engine/util";
+import { TeamManager } from "./TeamManager";
+import type { Session, TeamFile } from "../../store/team";
 import { EditableTable } from "./EditableTable";
 import { PropertiesEditor } from "./PropertiesEditor";
 
-type Section = "properties" | "transport" | "activities" | "settings" | "backup";
+type Section = "properties" | "transport" | "activities" | "settings" | "team" | "backup";
 const SECTIONS: { id: Section; label: string }[] = [
+  { id: "team", label: "Team & logins" },
   { id: "properties", label: "Properties" },
   { id: "transport", label: "Transport" },
   { id: "activities", label: "Activities" },
@@ -18,7 +22,13 @@ const SECTIONS: { id: Section; label: string }[] = [
 
 const CATEGORIES: ActivityCategory[] = ["Sightseeing", "Safari", "Boating", "Adventure", "Cultural", "Entry Ticket", "Guide", "Local Experience"];
 
-export function AdminPage(props: { db: Database; onChange: (db: Database) => void }) {
+export function AdminPage(props: {
+  db: Database;
+  onChange: (db: Database) => void;
+  teamFile?: TeamFile;
+  session?: Session;
+  onPublished: (file: TeamFile, session: Session) => void;
+}) {
   const [section, setSection] = useState<Section>("properties");
   const { db } = props;
   const patch = (p: Partial<Database>) => props.onChange({ ...db, ...p });
@@ -32,7 +42,12 @@ export function AdminPage(props: { db: Database; onChange: (db: Database) => voi
           </button>
         ))}
       </div>
-      <div className="muted" style={{ fontSize: "0.85rem" }}>Changes save automatically in this browser.</div>
+      <div className="muted" style={{ fontSize: "0.85rem" }}>
+        Changes save automatically in this browser.
+        {props.teamFile
+          ? ` Team rates last published ${formatDate(props.teamFile.publishedAt.slice(0, 10))}. To give your changes to the team, use Team & logins → Publish.`
+          : " To give these rates to your team, use Team & logins."}
+      </div>
 
       {section === "properties" && <PropertiesEditor rows={db.properties} onChange={(properties) => patch({ properties })} />}
 
@@ -137,6 +152,7 @@ export function AdminPage(props: { db: Database; onChange: (db: Database) => voi
       )}
 
       {section === "settings" && <SettingsEditor settings={db.settings} onChange={(settings) => patch({ settings })} />}
+      {section === "team" && <TeamManager db={db} file={props.teamFile} session={props.session} onPublished={props.onPublished} />}
       {section === "backup" && <Backup db={db} onChange={props.onChange} />}
     </div>
   );
@@ -323,3 +339,4 @@ function Backup({ db, onChange }: { db: Database; onChange: (db: Database) => vo
     </div>
   );
 }
+

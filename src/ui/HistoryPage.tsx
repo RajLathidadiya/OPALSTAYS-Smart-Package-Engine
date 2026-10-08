@@ -6,6 +6,7 @@ const STATUSES: SavedQuote["status"][] = ["draft", "sent", "confirmed", "lost"];
 
 export function HistoryPage(props: {
   quotes: SavedQuote[];
+  showProfit: boolean;
   onOpen: (id: string) => void;
   onUpdate: (q: SavedQuote) => void;
   onDelete: (id: string) => void;
@@ -20,7 +21,7 @@ export function HistoryPage(props: {
       <div className="kpis">
         <div className="kpi"><div className="l">Quotes</div><div className="v">{props.quotes.length}</div></div>
         <div className="kpi"><div className="l">Confirmed</div><div className="v">{confirmed.length}</div></div>
-        <div className="kpi"><div className="l">Confirmed profit</div><div className="v">{inr(confirmedProfit)}</div></div>
+        {props.showProfit && <div className="kpi"><div className="l">Confirmed profit</div><div className="v">{inr(confirmedProfit)}</div></div>}
       </div>
       <div className="card table-wrap">
         <table>
@@ -31,7 +32,7 @@ export function HistoryPage(props: {
               <th>Travel</th>
               <th>Chosen option</th>
               <th className="r">Price</th>
-              <th className="r">Profit</th>
+              {props.showProfit && <th className="r">Profit</th>}
               <th>Status</th>
               <th />
             </tr>
@@ -45,6 +46,7 @@ export function HistoryPage(props: {
                   <td className="num">{q.savedAt.slice(0, 10)}</td>
                   <td>
                     <strong>{r.customerName || "—"}</strong>
+                    {q.createdBy && <span className="muted" style={{ fontSize: "0.8rem" }}> · by {q.createdBy}</span>}
                     <div className="muted" style={{ fontSize: "0.8rem" }}>{[r.origin, ...r.destinations.map((d) => d.city)].join(" → ")} · {r.members} pax</div>
                   </td>
                   <td className="num">{formatDate(r.startDate)}</td>
@@ -60,7 +62,7 @@ export function HistoryPage(props: {
                     </select>
                   </td>
                   <td className="r num">{chosen ? inr(chosen.price.finalPrice) : "—"}</td>
-                  <td className="r num">{chosen ? inr(chosen.price.profit) : "—"}</td>
+                  {props.showProfit && <td className="r num">{chosen ? inr(chosen.price.profit) : "—"}</td>}
                   <td>
                     <select value={q.status} onChange={(e) => props.onUpdate({ ...q, status: e.target.value as SavedQuote["status"] })}>
                       {STATUSES.map((s) => <option key={s}>{s}</option>)}

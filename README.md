@@ -25,6 +25,7 @@ OPALSTAYS Database → Pricing Engine → Transport/Timing rules → Itinerary s
 - **Customer quote:** print or save as PDF, and copy WhatsApp text.
 - **Saved quotes** with status (draft/sent/confirmed/lost) and confirmed profit.
 - **Backup / restore** the whole database as a JSON file.
+- **Team logins (Admin / Staff):** one encrypted rate file for everyone; staff never see cost or profit.
 
 ## Run locally
 
@@ -37,17 +38,24 @@ npm test           # pricing engine tests
 npm run build      # production build in dist/
 ```
 
-## Put it on GitHub Pages
+## Hosting (Netlify)
 
-1. Push to `main`.
-2. In GitHub, go to **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-3. The workflow `.github/workflows/deploy.yml` tests, builds and deploys. The site URL appears in the Actions run.
+The site is hosted on Netlify (`netlify.toml`), linked to this GitHub repo. Every commit to `main` is built and published automatically, and the repo can stay private. GitHub Actions (`.github/workflows/ci.yml`) runs the tests on every change.
 
-Things to know:
+## Team logins
 
-- **Your data stays in your browser** (localStorage), not on GitHub. Each browser or computer has its own copy. Use **Admin → Backup** to move data between them, and download a backup regularly.
-- The *code and sample data* on a Pages site are public, even if nobody knows the link. Your real rates are not, because you enter them in the browser. Don't commit real rates into `src/data/seed.ts` if the repo or site is public.
-- GitHub Pages from a **private** repo needs a paid GitHub plan. You can also just run it locally.
+Everyone logs in with their own **User ID + password**.
+
+- **Admin**: everything, including cost, profit, rate editing and managing logins.
+- **Staff**: makes quotes and sees customer prices only. No cost, profit or Admin.
+
+Rates and logins live in `public/team-data.json`. The file is encrypted: the database is locked with a random key (AES-256-GCM), and that key is stored once per user, locked with a key derived from the user's own password (PBKDF2-SHA256). Without a valid login nobody can read it, even though the file is public.
+
+**After you change rates or logins:** go to **Admin → Team & logins → Download team-data.json**. Then on GitHub open the `public` folder, use **Add file → Upload files**, and **Commit changes**. The site redeploys and everyone gets the update.
+
+Saved quotes stay on each person's own device. Hiding cost and profit from staff is done in the app's screens; a technical person with a staff login could still decode the rates from the file.
+
+Never commit real rates unencrypted (for example into `src/data/seed.ts`).
 
 ## AI (optional)
 
